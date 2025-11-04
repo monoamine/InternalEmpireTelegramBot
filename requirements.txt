@@ -1,8 +1,8 @@
-aiogram-dialog
-aiogram==3.22.0
+setuptools
+numpy==1.26.0
 chatterbox-tts==0.1.2
-openai==1.109.1
+openai
+aiogram-dialog
+aiogram
+jsonpickle
 schedule
-telepot==12.7
-torch==2.6.0
-torchaudio==2.6.0

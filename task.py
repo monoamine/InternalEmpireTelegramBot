@@ -8,7 +8,7 @@ class Task:
         self.uid: str = str(uuid.uuid4())
         self.description: str = ""
         self.start_date: datetime.date = datetime.date.today()
-        self.remind_times: list[datetime.time] = []
+        self.remind_times = []
         self.completed: bool = False
 
     def id(self):
@@ -26,19 +26,21 @@ class Task:
     def set_start_date(self, start_date: datetime.date):
         self.start_date = start_date
 
-    def set_remind_times(self, remind_times: list[datetime.time]):
-        self.remind_times = remind_times
-
-    def set_remind_time(self, remind_time: datetime.time):
-        self.remind_times = [remind_time]
+    def set_remind_times(self, remind_times: list[str]):
+        self.remind_times = sorted(remind_times)
 
     def mark_completed(self):
         self.completed = True
 
     def __str__(self):
-        status = "Done" if self.completed else "Pending"
+        status = "Done" if self.completed else "Active"
 
-        return f"Status: {status}\n" \
-               f"Description: {self.description}\n" \
-               f"Start date: {self.start_date}\n" \
-               f"Remind times: {self.remind_times}\n"
+        text = f"Description: {self.description}\n" \
+               f"Status: {status}\n" \
+               f"Start date: {self.start_date.strftime("%d.%m.%Y")}\n" \
+               f"Remind times:\n"
+
+        for time in self.remind_times:
+            text += f"- {time[:5]}\n"
+
+        return text

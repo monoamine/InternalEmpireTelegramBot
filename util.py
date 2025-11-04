@@ -15,7 +15,7 @@ def read_json(file_name: str):
 
 class Environment:
     def __init__(self):
-        self.env_data : dict = read_json("env.json")
+        self.env_data: dict = read_json("env.json")
 
     def get(self, key: str):
         if key in self.env_data:
