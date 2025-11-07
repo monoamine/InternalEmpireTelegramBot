@@ -9,7 +9,7 @@ class Task:
         self.description: str = ""
         self.start_date: datetime.date = datetime.date.today()
         self.remind_times = []
-        self.completed: bool = False
+        self.enabled: bool = True
 
     def id(self):
         return self.uid
@@ -29,14 +29,17 @@ class Task:
     def set_remind_times(self, remind_times: list[str]):
         self.remind_times = sorted(remind_times)
 
-    def mark_completed(self):
-        self.completed = True
+    def is_enabled(self):
+        return self.enabled
+
+    def set_status(self, enabled: bool):
+        self.enabled = enabled
 
     def __str__(self):
-        status = "Done" if self.completed else "Active"
+        status = "Yes" if self.enabled else "No"
 
         text = f"Description: {self.description}\n" \
-               f"Status: {status}\n" \
+               f"Enabled: {status}\n" \
                f"Start date: {self.start_date.strftime("%d.%m.%Y")}\n" \
                f"Remind times:\n"
 

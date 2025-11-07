@@ -40,6 +40,7 @@ from aiogram_dialog.widgets.kbd import (
     CalendarConfig,
     Cancel,
     Column,
+    Counter,
     Group,
     ListGroup,
     Multiselect,
@@ -77,10 +78,15 @@ async def on_error(message: Message, widget, manager: DialogManager, error_: Val
 # ----------------------------------------------------------------------------------------------------------------------
 
 async def get_times(**kwargs):
+    used_times = task_manager.used_times()
     times = []
     for hour in range(6, 24):  # 9 AM to 4 PM
         for minute in (0, 30):
             time_obj = datetime.time(hour, minute)
+
+            if time_obj in used_times:
+                continue
+
             times.append({
                 "label": time_obj.strftime("%H:%M"),
                 "value": time_obj
@@ -99,9 +105,7 @@ async def get_all_tasks(**kwargs):
         all_tasks.append(entry)
         index += 1
 
-    return {
-        "list": all_tasks
-    }
+    return {"list": all_tasks}
 
 async def get_today_tasks(**kwargs):
     today_tasks = []
@@ -110,17 +114,43 @@ async def get_today_tasks(**kwargs):
         entry = (when, task.description)
         today_tasks.append(entry)
 
-    return {
-        "list": today_tasks
-    }
+    return {"list": today_tasks}
+
+async def get_tasks_description(**kwargs):
+    all_tasks = []
+    index = -1
+
+    for (task_id, task) in task_manager.all_tasks().items():
+        index += 1
+        if not task.is_enabled():
+            continue
+
+        label = task.description
+        if len(label) > 21:
+            label = label[:-3] + "..."
+
+        all_tasks.append({
+            "label": label,
+            "value": index
+        })
+
+    return {"list": all_tasks}
 
 def is_empty_list(data: dict, widget: Whenable, manager: DialogManager):
-    return len(data.get("list")) == 0
+    lst = data["list"]
+    return len(lst) == 0
 
 def is_non_empty_list(data: dict, widget: Whenable, manager: DialogManager):
-    return len(data.get("list")) > 0
+    lst = data.get("list")
+    return len(lst) > 0
 
 # ----------------------------------------------------------------------------------------------------------------------
+
+class NewTaskForm(StatesGroup):
+    description = State()
+    start_date = State()
+    remind_times = State()
+    summary = State()
 
 class AllTasksForm(StatesGroup):
     task_list = State()
@@ -128,11 +158,11 @@ class AllTasksForm(StatesGroup):
 class TodayTasksForm(StatesGroup):
     task_list = State()
 
-class NewTaskForm(StatesGroup):
-    description = State()
-    start_date = State()
-    remind_times = State()
-    summary = State()
+class RemoveTasksForm(StatesGroup):
+    task_list = State()
+
+class DisableTasksForm(StatesGroup):
+    task_list = State()
 
 # ----------------------------------------------------------------------------------------------------------------------
 
@@ -146,6 +176,16 @@ async def all_tasks_form(message: Message, dialog_manager: DialogManager):
 async def today_tasks_form(message: Message, dialog_manager: DialogManager):
     bot.set_chat_id(message.chat.id)
     await dialog_manager.start(TodayTasksForm.task_list, mode=StartMode.RESET_STACK)
+
+async def remove_tasks_form(message: Message, dialog_manager: DialogManager):
+    bot.set_chat_id(message.chat.id)
+    await dialog_manager.start(RemoveTasksForm.task_list, mode=StartMode.RESET_STACK)
+
+async def disable_tasks_form(message: Message, dialog_manager: DialogManager):
+    bot.set_chat_id(message.chat.id)
+    await dialog_manager.start(DisableTasksForm.task_list, mode=StartMode.RESET_STACK)
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 async def new_task_form(message: Message, dialog_manager: DialogManager):
     new_task_mgr.create()
@@ -173,7 +213,7 @@ async def on_date_selected(callback: CallbackQuery, widget, manager: DialogManag
     await manager.next()
 
 async def on_times_selected(callback: CallbackQuery, button, manager: DialogManager):
-    selected_times = manager.find("multiselect_remind_times").get_checked()
+    selected_times = manager.find("remind_times_multiselect").get_checked()
     new_task_mgr.task().set_remind_times(selected_times)
     await manager.next()
 
@@ -184,16 +224,40 @@ async def on_task_confirmed(callback: CallbackQuery, button: Button, manager: Di
     await msg.answer("Confirmed.")
     await manager.done()
 
-async def on_task_form_cancel(callback: CallbackQuery, button: Button, manager: DialogManager):
+async def on_cancel_new_task(callback: CallbackQuery, button: Button, manager: DialogManager):
     new_task_mgr.cancel()
     await on_cancel(callback, button, manager)
 
 # ----------------------------------------------------------------------------------------------------------------------
 
+async def on_tasks_removed(callback: CallbackQuery, button, manager: DialogManager):
+    selected_tasks = manager.find("remove_tasks_multiselect").get_checked()
+    task_manager.remove_tasks(selected_tasks)
+    msg = callback.message
+    await msg.answer("Confirmed.")
+    await manager.done()
+
+async def on_tasks_disabled(callback: CallbackQuery, button, manager: DialogManager):
+    selected_tasks = manager.find("disable_tasks_multiselect").get_checked()
+    task_manager.disable_tasks(selected_tasks)
+    msg = callback.message
+    await msg.answer("Confirmed.")
+    await manager.done()
+
+# ----------------------------------------------------------------------------------------------------------------------
+
 description_window = Window(
     Const("Task description:"),
-    Cancel(on_click=on_task_form_cancel),
-    TextInput(id="description_input", on_success=on_description_input, on_error=on_error),
+    Button(
+        text=Const("Cancel"),
+        id="cancel_new_task_button1",
+        on_click=on_cancel_new_task
+    ),
+    TextInput(
+        id="description_input",
+        on_success=on_description_input,
+        on_error=on_error
+    ),
     state=NewTaskForm.description
 )
 
@@ -205,8 +269,16 @@ start_date_window = Window(
         config=calendar_cfg
     ),
     Row(
-        Button(text=Const("Back"), id="back_to_desc_button", on_click=on_description_edit),
-        Cancel(on_click=on_task_form_cancel)
+        Button(
+            text=Const("Back"),
+            id="back_to_desc_button",
+            on_click=on_description_edit
+        ),
+        Button(
+            text=Const("Cancel"),
+            id="cancel_new_task_button2",
+            on_click=on_cancel_new_task
+        )
     ),
     state=NewTaskForm.start_date
 )
@@ -217,7 +289,7 @@ remind_times_window = Window(
         Multiselect(
             checked_text=Format("✓ {item[label]}"),
             unchecked_text=Format("{item[label]}"),
-            id="multiselect_remind_times",
+            id="remind_times_multiselect",
             item_id_getter=operator.itemgetter("value"),
             items="times"
         ),
@@ -225,23 +297,45 @@ remind_times_window = Window(
     ),
     Row(
         Back(),
-        Cancel(on_click=on_task_form_cancel)
+        Button(
+            Const("Cancel"),
+            id="cancel_new_task_button3",
+            on_click=on_cancel_new_task
+        )
     ),
-    Button(text=Const("Confirm"), id="confirm_times", on_click=on_times_selected),
+    Button(
+        text=Const("Confirm"),
+        id="confirm_remind_times_button",
+        on_click=on_times_selected
+    ),
     state=NewTaskForm.remind_times,
     getter=get_times
 )
 
 summary_window = Window(
     Jinja("<b>Here is a summary of your task:</b>\n{{summary}}"),
-    Row(Back(), Cancel()),
-    Button(text=Const("Confirm"), id="confirm", on_click=on_task_confirmed),
+    Row(
+        Back(),
+        Cancel()
+    ),
+    Button(
+        text=Const("Confirm"),
+        id="confirm",
+        on_click=on_task_confirmed
+    ),
     state=NewTaskForm.summary,
     getter=get_summary,
     parse_mode="html"
 )
 
 # ----------------------------------------------------------------------------------------------------------------------
+
+new_task_dialog = Dialog(
+    description_window,
+    start_date_window,
+    remind_times_window,
+    summary_window
+)
 
 all_tasks_dialog = Dialog(
     Window(
@@ -250,7 +344,10 @@ all_tasks_dialog = Dialog(
             items="list",
             when=is_non_empty_list
         ),
-        Const("You haven't created any tasks yet! Use /new command.", when=is_empty_list),
+        Const(
+            "You haven't created any tasks yet! Use /new command.",
+            when=is_empty_list
+        ),
         state=AllTasksForm.task_list,
         getter=get_all_tasks
     )
@@ -263,17 +360,75 @@ today_tasks_dialog = Dialog(
             items="list",
             when=is_non_empty_list
         ),
-        Const("No remaining tasks for today.", when=is_empty_list),
+        Const(
+            "No remaining tasks for today.",
+            when=is_empty_list
+        ),
         state=TodayTasksForm.task_list,
         getter=get_today_tasks
     )
 )
 
-new_task_dialog = Dialog(
-    description_window,
-    start_date_window,
-    remind_times_window,
-    summary_window
+remove_tasks_dialog = Dialog(
+    Window(
+        Const(
+            "Select tasks to remove:"
+            #when=is_non_empty_list
+        ),
+        Const(
+            "You haven't created any tasks yet! Use /new command.",
+            when=is_empty_list
+        ),
+        Group(
+            Multiselect(
+                checked_text=Format("✓ {item[label]}"),
+                unchecked_text=Format("{item[label]}"),
+                id="remove_tasks_multiselect",
+                item_id_getter=operator.itemgetter("value"),
+                items="list"
+            ),
+            when=is_non_empty_list,
+            width=1
+        ),
+        Button(
+            text=Const("Confirm"),
+            id="confirm_remove_tasks_button",
+            on_click=on_tasks_removed,
+            when=is_non_empty_list
+        ),
+        state=RemoveTasksForm.task_list,
+        getter=get_tasks_description
+    )
+)
+
+disable_tasks_dialog = Dialog(
+    Window(
+        Const(
+            "Select tasks to disable:",
+        ),
+        Const(
+            "You haven't created any tasks yet! Use /new command.",
+            when=is_empty_list
+        ),
+        Column(
+            Multiselect(
+                checked_text=Format("✓ {item[label]}"),
+                unchecked_text=Format("{item[label]}"),
+                id="disable_tasks_multiselect",
+                item_id_getter=operator.itemgetter("value"),
+                items="list"
+            ),
+            #when=is_non_empty_list
+        ),
+        Button(
+            text=Const("Confirm"),
+            id="confirm_disable_tasks_button",
+            on_click=on_tasks_disabled,
+            when=is_non_empty_list
+        ),
+        state=DisableTasksForm.task_list,
+        getter=get_tasks_description
+    )
 )
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -289,6 +444,12 @@ async def main():
 
     bot.include_router(today_tasks_dialog)
     bot.register_command(today_tasks_form, Command("today"))
+
+    bot.include_router(remove_tasks_dialog)
+    bot.register_command(remove_tasks_form, Command("remove"))
+
+    bot.include_router(disable_tasks_dialog)
+    bot.register_command(disable_tasks_form, Command("disable"))
 
     await scheduler.start()
     await bot.start()
