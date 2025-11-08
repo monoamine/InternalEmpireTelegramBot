@@ -35,18 +35,19 @@ class TaskManager:
         for index in indices:
             self.__remove_task(index)
 
-        #for task_id in task_ids:
-        #    self.tasks.pop(task_id)
-
         self.__save_tasks()
         self.__reload_tasks()
 
     def disable_tasks(self, indices: list):
         for index in indices:
-            self.__disable_task(index)
+            self.__enable_task(index, False)
 
-        #for task_id in task_ids:
-        #    self.tasks[task_id].enabled = False
+        self.__save_tasks()
+        self.__reload_tasks()
+
+    def enable_tasks(self, indices: list):
+        for index in indices:
+            self.__enable_task(index, True)
 
         self.__save_tasks()
         self.__reload_tasks()
@@ -80,14 +81,14 @@ class TaskManager:
             self.tasks.pop(task_id)
             break
 
-    def __disable_task(self, index: int):
+    def __enable_task(self, index: int, enabled: bool):
         i = 0
         for (task_id, task) in self.tasks.items():
             if str(i) != index:
                 i += 1
                 continue
 
-            self.tasks.get(task_id).enabled = False
+            self.tasks.get(task_id).enabled = enabled
             break
 
     def __add_task_reminders(self, task: Task):

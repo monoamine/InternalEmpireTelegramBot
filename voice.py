@@ -2,6 +2,7 @@ from chatterbox.tts import ChatterboxTTS
 from task import Task
 from util import Environment
 
+import hashlib
 import openai
 import torch
 import torchaudio
@@ -22,10 +23,25 @@ class VoiceGenerator:
         reminder_text = self.chatgpt.responses.create(model="gpt-4", input=request).output_text
         return reminder_text
 
+    def query_chat_gpt(self, query):
+        response = self.chatgpt.responses.create(model="gpt-4", input=query).output_text
+        return response
+
     def generate_voice(self, task: Task):
         result_filename = f"voice-{task.id()}.wav"
         reminder_text = self.generate_reminder(task)
         wav_file = self.model.generate(reminder_text, audio_prompt_path=self.ref_audio)
+
+        torchaudio.save(result_filename, wav_file, self.model.sr)
+        return result_filename
+
+    def generate_voice_from_text(self, text: str):
+        md5_object = hashlib.md5()
+        md5_object.update(text.encode('utf-8'))
+        md5_hash = md5_object.hexdigest()
+
+        result_filename = f"voice-{md5_hash}.wav"
+        wav_file = self.model.generate(text, audio_prompt_path=self.ref_audio)
 
         torchaudio.save(result_filename, wav_file, self.model.sr)
         return result_filename

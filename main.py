@@ -97,6 +97,15 @@ async def get_times(**kwargs):
 async def get_summary(**kwargs):
     return {"summary": new_task_mgr.task()}
 
+async def get_history(**kwargs):
+    history = await bot.get_chat_history()
+    result = []
+    for item in history:
+        entry = (item["query"], item["response"])
+        result.append(entry)
+
+    return {"list": result}
+
 async def get_all_tasks(**kwargs):
     all_tasks = []
     index = 1
@@ -136,6 +145,26 @@ async def get_tasks_description(**kwargs):
 
     return {"list": all_tasks}
 
+async def get_disabled_tasks_description(**kwargs):
+    all_tasks = []
+    index = -1
+
+    for (task_id, task) in task_manager.all_tasks().items():
+        index += 1
+        if task.is_enabled():
+            continue
+
+        label = task.description
+        if len(label) > 21:
+            label = label[:-3] + "..."
+
+        all_tasks.append({
+            "label": label,
+            "value": index
+        })
+
+    return {"list": all_tasks}
+
 def is_empty_list(data: dict, widget: Whenable, manager: DialogManager):
     lst = data["list"]
     return len(lst) == 0
@@ -152,6 +181,16 @@ class NewTaskForm(StatesGroup):
     remind_times = State()
     summary = State()
 
+class ChatForm(StatesGroup):
+    query = State()
+
+class VoiceForm(StatesGroup):
+    query = State()
+    response = State()
+
+class HistoryForm(StatesGroup):
+    history = State()
+
 class AllTasksForm(StatesGroup):
     task_list = State()
 
@@ -164,18 +203,38 @@ class RemoveTasksForm(StatesGroup):
 class DisableTasksForm(StatesGroup):
     task_list = State()
 
+class EnableTasksForm(StatesGroup):
+    task_list = State()
+
 # ----------------------------------------------------------------------------------------------------------------------
 
 async def on_bot_start(message):
     bot.set_chat_id(message.chat.id)
 
-async def all_tasks_form(message: Message, dialog_manager: DialogManager):
+async def new_task_form(message: Message, dialog_manager: DialogManager):
+    new_task_mgr.create()
     bot.set_chat_id(message.chat.id)
-    await dialog_manager.start(AllTasksForm.task_list, mode=StartMode.RESET_STACK)
+    await dialog_manager.start(NewTaskForm.description, mode=StartMode.RESET_STACK)
+
+async def chat_form(message: Message, dialog_manager: DialogManager):
+    bot.set_chat_id(message.chat.id)
+    await dialog_manager.start(ChatForm.query, mode=StartMode.RESET_STACK)
+
+async def voice_form(message: Message, dialog_manager: DialogManager):
+    bot.set_chat_id(message.chat.id)
+    await dialog_manager.start(VoiceForm.query, mode=StartMode.RESET_STACK)
+
+async def history_form(message: Message, dialog_manager: DialogManager):
+    bot.set_chat_id(message.chat.id)
+    await dialog_manager.start(HistoryForm.history, mode=StartMode.RESET_STACK)
 
 async def today_tasks_form(message: Message, dialog_manager: DialogManager):
     bot.set_chat_id(message.chat.id)
     await dialog_manager.start(TodayTasksForm.task_list, mode=StartMode.RESET_STACK)
+
+async def all_tasks_form(message: Message, dialog_manager: DialogManager):
+    bot.set_chat_id(message.chat.id)
+    await dialog_manager.start(AllTasksForm.task_list, mode=StartMode.RESET_STACK)
 
 async def remove_tasks_form(message: Message, dialog_manager: DialogManager):
     bot.set_chat_id(message.chat.id)
@@ -185,12 +244,11 @@ async def disable_tasks_form(message: Message, dialog_manager: DialogManager):
     bot.set_chat_id(message.chat.id)
     await dialog_manager.start(DisableTasksForm.task_list, mode=StartMode.RESET_STACK)
 
-# ----------------------------------------------------------------------------------------------------------------------
-
-async def new_task_form(message: Message, dialog_manager: DialogManager):
-    new_task_mgr.create()
+async def enable_tasks_form(message: Message, dialog_manager: DialogManager):
     bot.set_chat_id(message.chat.id)
-    await dialog_manager.start(NewTaskForm.description, mode=StartMode.RESET_STACK)
+    await dialog_manager.start(EnableTasksForm.task_list, mode=StartMode.RESET_STACK)
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 async def on_description_input(message: Message, widget, manager: DialogManager, data):
     last_msg_id = manager.current_stack().last_message_id
@@ -230,6 +288,17 @@ async def on_cancel_new_task(callback: CallbackQuery, button: Button, manager: D
 
 # ----------------------------------------------------------------------------------------------------------------------
 
+async def on_chat_input(message: Message, widget, manager: DialogManager, data):
+    query = message.text
+    await bot.query_chat_gpt(message.chat.id, query)
+    await manager.done()
+
+async def on_voice_input(message: Message, widget, manager: DialogManager, data):
+    query = message.text
+    await message.answer("Please wait, generating a voice message...")
+    await bot.generate_voice_from_text(message.chat.id, query)
+    await manager.done()
+
 async def on_tasks_removed(callback: CallbackQuery, button, manager: DialogManager):
     selected_tasks = manager.find("remove_tasks_multiselect").get_checked()
     task_manager.remove_tasks(selected_tasks)
@@ -240,6 +309,13 @@ async def on_tasks_removed(callback: CallbackQuery, button, manager: DialogManag
 async def on_tasks_disabled(callback: CallbackQuery, button, manager: DialogManager):
     selected_tasks = manager.find("disable_tasks_multiselect").get_checked()
     task_manager.disable_tasks(selected_tasks)
+    msg = callback.message
+    await msg.answer("Confirmed.")
+    await manager.done()
+
+async def on_tasks_enabled(callback: CallbackQuery, button, manager: DialogManager):
+    selected_tasks = manager.find("enable_tasks_multiselect").get_checked()
+    task_manager.enable_tasks(selected_tasks)
     msg = callback.message
     await msg.answer("Confirmed.")
     await manager.done()
@@ -337,6 +413,56 @@ new_task_dialog = Dialog(
     summary_window
 )
 
+chat_dialog = Dialog(
+    Window(
+        Const("Ask anything from ChatGPT:"),
+        Button(
+            text=Const("Cancel"),
+            id="cancel_chat_button",
+            on_click=on_cancel
+        ),
+        TextInput(
+            id="chat_input",
+            on_success=on_chat_input,
+            on_error=on_error
+        ),
+        state=ChatForm.query
+    )
+)
+
+history_dialog = Dialog(
+    Window(
+        List(
+            Format("Q: {item[0]}\nA: {item[1]}\n\n"),
+            items="list",
+            when=is_non_empty_list
+        ),
+        Const(
+            "Your chat history is empty. Use /chat to start a new chat.",
+            when=is_empty_list
+        ),
+        state=HistoryForm.history,
+        getter=get_history
+    )
+)
+
+voice_dialog = Dialog(
+    Window(
+        Const("Text to generate a voice message from:"),
+        Button(
+            text=Const("Cancel"),
+            id="cancel_voice_button",
+            on_click=on_cancel
+        ),
+        TextInput(
+            id="voice_input",
+            on_success=on_voice_input,
+            on_error=on_error
+        ),
+        state=VoiceForm.query
+    )
+)
+
 all_tasks_dialog = Dialog(
     Window(
         List(
@@ -372,8 +498,8 @@ today_tasks_dialog = Dialog(
 remove_tasks_dialog = Dialog(
     Window(
         Const(
-            "Select tasks to remove:"
-            #when=is_non_empty_list
+            "Select tasks to remove:",
+            when=is_non_empty_list
         ),
         Const(
             "You haven't created any tasks yet! Use /new command.",
@@ -405,6 +531,7 @@ disable_tasks_dialog = Dialog(
     Window(
         Const(
             "Select tasks to disable:",
+            when=is_non_empty_list
         ),
         Const(
             "You haven't created any tasks yet! Use /new command.",
@@ -418,7 +545,7 @@ disable_tasks_dialog = Dialog(
                 item_id_getter=operator.itemgetter("value"),
                 items="list"
             ),
-            #when=is_non_empty_list
+            when=is_non_empty_list
         ),
         Button(
             text=Const("Confirm"),
@@ -431,25 +558,68 @@ disable_tasks_dialog = Dialog(
     )
 )
 
+enable_tasks_dialog = Dialog(
+    Window(
+        Const(
+            "Select tasks to enable:",
+            when=is_non_empty_list
+        ),
+        Const(
+            "You have no disabled tasks.",
+            when=is_empty_list
+        ),
+        Column(
+            Multiselect(
+                checked_text=Format("✓ {item[label]}"),
+                unchecked_text=Format("{item[label]}"),
+                id="enable_tasks_multiselect",
+                item_id_getter=operator.itemgetter("value"),
+                items="list"
+            ),
+            when=is_non_empty_list
+        ),
+        Button(
+            text=Const("Confirm"),
+            id="confirm_enable_tasks_button",
+            on_click=on_tasks_enabled,
+            when=is_non_empty_list
+        ),
+        state=EnableTasksForm.task_list,
+        getter=get_disabled_tasks_description
+    )
+)
+
 # ----------------------------------------------------------------------------------------------------------------------
 
 async def main():
     bot.register_command(on_bot_start, CommandStart())
 
-    bot.include_router(all_tasks_dialog)
-    bot.register_command(all_tasks_form, Command("all"))
-
     bot.include_router(new_task_dialog)
     bot.register_command(new_task_form, Command("new"))
 
+    bot.include_router(chat_dialog)
+    bot.register_command(chat_form, Command("chat"))
+
+    bot.include_router(history_dialog)
+    bot.register_command(history_form, Command("history"))
+
+    bot.include_router(voice_dialog)
+    bot.register_command(voice_form, Command("voice"))
+
     bot.include_router(today_tasks_dialog)
     bot.register_command(today_tasks_form, Command("today"))
+
+    bot.include_router(all_tasks_dialog)
+    bot.register_command(all_tasks_form, Command("all"))
 
     bot.include_router(remove_tasks_dialog)
     bot.register_command(remove_tasks_form, Command("remove"))
 
     bot.include_router(disable_tasks_dialog)
     bot.register_command(disable_tasks_form, Command("disable"))
+
+    bot.include_router(enable_tasks_dialog)
+    bot.register_command(enable_tasks_form, Command("enable"))
 
     await scheduler.start()
     await bot.start()
