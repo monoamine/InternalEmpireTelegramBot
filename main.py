@@ -165,6 +165,23 @@ async def get_disabled_tasks_description(**kwargs):
 
     return {"list": all_tasks}
 
+async def get_help(**kwargs):
+    help_list = [
+        "/start - Start the bot.",
+        "/new - Create a new task and configure its reminders.",
+        "/chat - Send a query to ChatGPT.",
+        "/history - Show your ChatGPT chat history.",
+        "/voice - Generate a voice message from text.",
+        "/today - List remaining reminders for today.",
+        "/all - List all registered tasks.",
+        "/remove - Remove some tasks.",
+        "/disable - Disable some tasks.",
+        "/enable - Enable some disabled tasks.",
+        "/help - Show this message."
+    ]
+
+    return {"list": help_list}
+
 def is_empty_list(data: dict, widget: Whenable, manager: DialogManager):
     lst = data["list"]
     return len(lst) == 0
@@ -205,6 +222,9 @@ class DisableTasksForm(StatesGroup):
 
 class EnableTasksForm(StatesGroup):
     task_list = State()
+
+class HelpForm(StatesGroup):
+    help_list = State()
 
 # ----------------------------------------------------------------------------------------------------------------------
 
@@ -247,6 +267,10 @@ async def disable_tasks_form(message: Message, dialog_manager: DialogManager):
 async def enable_tasks_form(message: Message, dialog_manager: DialogManager):
     bot.set_chat_id(message.chat.id)
     await dialog_manager.start(EnableTasksForm.task_list, mode=StartMode.RESET_STACK)
+
+async def help_form(message: Message, dialog_manager: DialogManager):
+    bot.set_chat_id(message.chat.id)
+    await dialog_manager.start(HelpForm.help_list, mode=StartMode.RESET_STACK)
 
 # ----------------------------------------------------------------------------------------------------------------------
 
@@ -589,6 +613,17 @@ enable_tasks_dialog = Dialog(
     )
 )
 
+help_dialog = Dialog(
+    Window(
+        List(
+            Format("{item}"),
+            items="list"
+        ),
+        state=HelpForm.help_list,
+        getter=get_help
+    )
+)
+
 # ----------------------------------------------------------------------------------------------------------------------
 
 async def main():
@@ -596,6 +631,9 @@ async def main():
 
     bot.include_router(new_task_dialog)
     bot.register_command(new_task_form, Command("new"))
+
+    bot.include_router(help_dialog)
+    bot.register_command(help_form, Command("help"))
 
     bot.include_router(chat_dialog)
     bot.register_command(chat_form, Command("chat"))
